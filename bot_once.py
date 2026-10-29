@@ -70,15 +70,48 @@ def parse(xml_text):
     return items
 
 
+UA = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"}
+
+
+def fetch_syndication(user):
+    r = requests.get(
+        f"https://syndication.twitter.com/srv/timeline-profile/screen-name/{user}",
+        timeout=20, headers=UA)
+    print(user, "syndication status", r.status_code)
+    if r.status_code != 200:
+        return None
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', r.text, re.S)
+    if not m:
+        return None
+    data = json.loads(m.group(1))
+    entries = data["props"]["pageProps"]["timeline"]["entries"]
+    items = []
+    for e in entries:
+        if e.get("type") != "tweet":
+            continue
+        t = e["content"]["tweet"]
+        if "retweeted_status" in t or t.get("in_reply_to_status_id_str"):
+            continue
+        tid = int(t["id_str"])
+        text = html.unescape(t.get("full_text") or t.get("text") or "")
+        items.append((tid, text, f"https://x.com/i/status/{tid}"))
+    return items
+
+
 def fetch(user):
     for inst in NITTER:
         try:
-            r = requests.get(f"{inst}/{user}/rss", timeout=15,
-                             headers={"User-Agent": "Mozilla/5.0"})
+            r = requests.get(f"{inst}/{user}/rss", timeout=15, headers=UA)
+            print(user, inst, "status", r.status_code)
             if r.status_code == 200 and "<rss" in r.text[:500]:
                 return parse(r.text)
-        except Exception:
-            continue
+        except Exception as e:
+            print(user, inst, "error", e)
+    try:
+        return fetch_syndication(user)
+    except Exception as e:
+        print(user, "syndication error", e)
     return None
 
 
